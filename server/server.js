@@ -6,6 +6,29 @@ import Shopify, { ApiVersion } from "@shopify/shopify-api";
 import Koa from "koa";
 import next from "next";
 import Router from "koa-router";
+import { connect } from "mongoose";
+import { dbConnection } from "./databases";
+import winston from "winston";
+import * as C from "./controllers";
+
+const logger = winston.createLogger({
+  level: "info",
+  format: winston.format.json(),
+  transports: [
+    new winston.transports.File({
+      filename: "./logs/error.log",
+      level: "error",
+    }),
+    new winston.transports.File({ filename: "./logs/combined.log" }),
+  ],
+});
+if (process.env.NODE_ENV !== "production") {
+  logger.add(
+    new winston.transports.Console({
+      format: winston.format.simple(),
+    })
+  );
+}
 
 dotenv.config();
 const port = parseInt(process.env.PORT, 10) || 8081;
@@ -31,6 +54,9 @@ Shopify.Context.initialize({
 const ACTIVE_SHOPIFY_SHOPS = {};
 
 app.prepare().then(async () => {
+  connect(dbConnection.url, dbConnection.options, () => {
+    logger.info("Connected DB successfully !");
+  });
   const server = new Koa();
   const router = new Router();
   server.keys = [Shopify.Context.API_SECRET_KEY];
@@ -39,6 +65,18 @@ app.prepare().then(async () => {
       async afterAuth(ctx) {
         // Access token and shop available in ctx.state.shopify
         const { shop, accessToken, scope } = ctx.state.shopify;
+        const dataStore = {
+          name: shop,
+          accessToken: accessToken,
+          scope: scope,
+          active: true,
+        };
+        const store = await C.storeController.findStoreByName(shop);
+        if (!!store) {
+          await C.storeController.updateStatusStoreById(store._id, true);
+        } else {
+          await C.storeController.createStore(dataStore);
+        }
         const host = ctx.query.host;
         ACTIVE_SHOPIFY_SHOPS[shop] = scope;
 
@@ -47,8 +85,9 @@ app.prepare().then(async () => {
           accessToken,
           path: "/webhooks",
           topic: "APP_UNINSTALLED",
-          webhookHandler: async (topic, shop, body) =>
-            delete ACTIVE_SHOPIFY_SHOPS[shop],
+          webhookHandler: async (topic, shop, body) => {
+            await C.storeController.updateStatusStoreByName(shop, false);
+          },
         });
 
         if (!response.success) {
@@ -69,41 +108,33 @@ app.prepare().then(async () => {
     ctx.res.statusCode = 200;
   };
 
-  router.get("/", async (ctx) => {
-    const shop = ctx.query.shop;
+  router
+    .get("/", async (ctx) => {
+      const shop = ctx.query.shop;
+      if (ACTIVE_SHOPIFY_SHOPS[shop] === undefined) {
+        ctx.redirect(`/auth?shop=${shop}`);
+      } else {
+        await handleRequest(ctx);
+      }
+    })
+    .post("/webhooks", async (ctx) => {
+      try {
+        await Shopify.Webhooks.Registry.process(ctx.req, ctx.res);
+        console.log(`Webhook processed, returned status code 200`);
+      } catch (error) {
+        console.log(`Failed to process webhook: ${error}`);
+      }
+    })
+    .get("(/_next/static/.*)", handleRequest)
+    .get("/_next/webpack-hmr", handleRequest)
+    .get("(.*)", verifyRequest(), handleRequest)
+    .get("/test", (ctx, next) => (ctx.body = "OK"));
 
-    // This shop hasn't been seen yet, go through OAuth to create a session
-    if (ACTIVE_SHOPIFY_SHOPS[shop] === undefined) {
-      ctx.redirect(`/auth?shop=${shop}`);
-    } else {
-      await handleRequest(ctx);
-    }
-  });
-
-  router.post("/webhooks", async (ctx) => {
-    try {
-      await Shopify.Webhooks.Registry.process(ctx.req, ctx.res);
-      console.log(`Webhook processed, returned status code 200`);
-    } catch (error) {
-      console.log(`Failed to process webhook: ${error}`);
-    }
-  });
-
-  router.post(
-    "/graphql",
-    verifyRequest({ returnHeader: true }),
-    async (ctx, next) => {
-      await Shopify.Utils.graphqlProxy(ctx.req, ctx.res);
-    }
-  );
-
-  router.get("(/_next/static/.*)", handleRequest); // Static content is clear
-  router.get("/_next/webpack-hmr", handleRequest); // Webpack content is clear
-  router.get("(.*)", verifyRequest(), handleRequest); // Everything else must have sessions
-
-  server.use(router.allowedMethods());
-  server.use(router.routes());
+  server.use(router.allowedMethods()).use(router.routes());
   server.listen(port, () => {
-    console.log(`> Ready on http://localhost:${port}`);
+    logger.info(`=================================`);
+    logger.info(`======= ENV: ${process.env.NODE_ENV} =======`);
+    logger.info(`🚀 App listening on the port ${port}`);
+    logger.info(`=================================`);
   });
 });

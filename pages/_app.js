@@ -41,10 +41,11 @@ function MyProvider(props) {
   });
 
   const Component = props.Component;
+  const fetchFunction = authenticatedFetch(app);
 
   return (
     <ApolloProvider client={client}>
-      <Component {...props} />
+      <Component fetch={fetchFunction} {...props} />
     </ApolloProvider>
   );
 }

@@ -1,9 +1,12 @@
-import { Heading, Page } from "@shopify/polaris";
+import React from "react";
+import Layout from "../client/components/layouts";
 
-const Index = () => (
-  <Page>
-    <Heading>Shopify app with Node and React 🎉</Heading>
-  </Page>
-);
+const Index = ({ fetch }) => {
+  console.log(fetch);
+  React.useEffect(() => {
+    fetch("/test").then((res) => console.log(res));
+  }, []);
+  return <Layout>aadadana🎉</Layout>;
+};
 
 export default Index;
