@@ -14,7 +14,7 @@ class StoreController {
   };
   createStore = async (storeData) => {
     try {
-      const data = await this.store.create(storeData, { new: true });
+      const data = await this.store.create(storeData);
       return data;
     } catch (error) {
       console.log(error);

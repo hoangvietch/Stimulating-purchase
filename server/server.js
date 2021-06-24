@@ -6,10 +6,14 @@ import Shopify, { ApiVersion } from "@shopify/shopify-api";
 import Koa from "koa";
 import next from "next";
 import Router from "koa-router";
-import { connect } from "mongoose";
+import mongoose from "mongoose";
 import { dbConnection } from "./databases";
 import winston from "winston";
 import * as C from "./controllers";
+
+mongoose.set("useNewUrlParser", true);
+mongoose.set("useFindAndModify", false);
+mongoose.set("useCreateIndex", true);
 
 const logger = winston.createLogger({
   level: "info",
@@ -54,7 +58,7 @@ Shopify.Context.initialize({
 const ACTIVE_SHOPIFY_SHOPS = {};
 
 app.prepare().then(async () => {
-  connect(dbConnection.url, dbConnection.options, () => {
+  mongoose.connect(dbConnection.url, dbConnection.options, () => {
     logger.info("Connected DB successfully !");
   });
   const server = new Koa();
@@ -127,8 +131,8 @@ app.prepare().then(async () => {
     })
     .get("(/_next/static/.*)", handleRequest)
     .get("/_next/webpack-hmr", handleRequest)
-    .get("(.*)", verifyRequest(), handleRequest)
-    .get("/test", (ctx, next) => (ctx.body = "OK"));
+    .get("/test", (ctx, next) => (ctx.body = "OK"))
+    .get("(.*)", verifyRequest(), handleRequest);
 
   server.use(router.allowedMethods()).use(router.routes());
   server.listen(port, () => {
